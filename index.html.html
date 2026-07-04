@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>配当ポートフォリオ管理</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#fff;--bg2:#f5f5f3;--bg-info:#e6f1fb;--bg-green:#e1f5ee;
+    --text:#1a1a18;--text2:#5f5e5a;--text3:#888780;
+    --text-info:#185fa5;--text-green:#085041;
+    --border:rgba(0,0,0,.11);--green:#0f6e56;--red:#a32d2d;--blue:#185fa5;
+    --r:10px;--rl:14px;
+  }
+  @media(prefers-color-scheme:dark){:root{
+    --bg:#1c1c1a;--bg2:#262623;--bg-info:#0c2a45;--bg-green:#04342c;
+    --text:#f0ede8;--text2:#b4b2a9;--text3:#888780;
+    --text-info:#85b7eb;--text-green:#9fe1cb;
+    --border:rgba(255,255,255,.1);--green:#5dcaa5;--red:#f09595;--blue:#85b7eb;
+  }}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic UI",sans-serif;background:var(--bg2);color:var(--text);min-height:100vh;line-height:1.6}
+  .header{background:var(--bg);border-bottom:.5px solid var(--border);padding:1rem 1.5rem;position:sticky;top:0;z-index:10}
+  .header-inner{max-width:1100px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.75rem}
+  .app-title{font-size:17px;font-weight:500}.app-sub{font-size:12px;color:var(--text3);margin-top:2px}
+  .update-btn{display:flex;align-items:center;gap:6px;padding:.45rem 1rem;font-size:13px;border-radius:99px;border:.5px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;font-family:inherit;white-space:nowrap}
+  .update-btn:hover{background:var(--bg2)}.update-btn.loading{opacity:.6;pointer-events:none}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0}
+  .dot.pulsing{background:#f0c040;animation:pulse 1s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .container{max-width:1100px;margin:0 auto;padding:1.5rem}
+  .mg{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:1.5rem}
+  .mc{background:var(--bg);border-radius:var(--r);padding:1rem 1.1rem;border:.5px solid var(--border)}
+  .mc.ac{background:var(--bg-info);border-color:transparent}
+  .ml{font-size:11px;color:var(--text2);margin-bottom:.35rem;line-height:1.4}
+  .mc.ac .ml{color:var(--text-info);opacity:.85}
+  .mv{font-size:22px;font-weight:500;color:var(--text);line-height:1.1}
+  .mc.ac .mv{color:var(--text-info)}
+  .ms{font-size:11px;color:var(--text3);margin-top:.3rem}
+  .mc.ac .ms{color:var(--text-info);opacity:.65}
+  .tab-bar{display:flex;gap:4px;margin-bottom:1.25rem;flex-wrap:wrap}
+  .tab-btn{padding:.4rem 1rem;font-size:13px;border-radius:99px;border:.5px solid var(--border);cursor:pointer;background:transparent;color:var(--text2);font-family:inherit}
+  .tab-btn.active{background:var(--text);color:var(--bg);border-color:var(--text)}
+  .card{background:var(--bg);border:.5px solid var(--border);border-radius:var(--rl);padding:1.25rem;margin-bottom:1rem}
+  .sl{font-size:11px;letter-spacing:.07em;color:var(--text3);text-transform:uppercase;margin-bottom:.85rem}
+  .table-wrap{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:13px;min-width:900px}
+  th{text-align:left;font-size:11px;color:var(--text3);font-weight:400;padding:.55rem 1rem;border-bottom:.5px solid var(--border);white-space:nowrap}
+  th:not(:first-child){text-align:right}
+  td{padding:.8rem 1rem;border-bottom:.5px solid var(--border);color:var(--text);vertical-align:middle}
+  td:not(:first-child){text-align:right}
+  tr:last-child td{border-bottom:none}
+  .tm{font-weight:500;font-size:14px}.ts{font-size:11px;color:var(--text2);margin-top:2px}
+  .pos{color:var(--green)}.neg{color:var(--red)}
+  .badge{display:inline-block;font-size:10px;padding:2px 7px;border-radius:99px;font-weight:500;white-space:nowrap}
+  .badge-soon{background:#fcebeb;color:#a32d2d}.badge-normal{background:#eaf3de;color:#3b6d11}.badge-upcoming{background:#e6f1fb;color:#185fa5}
+  @media(prefers-color-scheme:dark){.badge-soon{background:#501313;color:#f09595}.badge-normal{background:#173404;color:#c0dd97}.badge-upcoming{background:#042c53;color:#85b7eb}}
+  .tag-yoc{font-size:10px;padding:1px 5px;background:#e1f5ee;color:#085041;border-radius:4px;font-weight:500}
+  @media(prefers-color-scheme:dark){.tag-yoc{background:#04342c;color:#5dcaa5}}
+  .tag-auto{font-size:10px;color:var(--green);margin-left:3px}
+  .del-btn{background:none;border:none;cursor:pointer;color:var(--text3);font-size:15px;padding:2px 6px;border-radius:4px;line-height:1;font-family:inherit}
+  .del-btn:hover{color:var(--red);background:var(--bg2)}
+  .edit-btn{background:none;border:.5px solid var(--border);cursor:pointer;color:var(--text2);font-size:12px;padding:3px 8px;border-radius:6px;font-family:inherit;white-space:nowrap}
+  .edit-btn:hover{background:var(--bg2)}
+  .save-btn{background:var(--text);color:var(--bg);border:none;cursor:pointer;font-size:12px;padding:4px 10px;border-radius:6px;font-family:inherit;white-space:nowrap}
+  .cancel-btn{background:none;border:.5px solid var(--border);cursor:pointer;color:var(--text2);font-size:12px;padding:3px 8px;border-radius:6px;font-family:inherit;white-space:nowrap}
+  .edit-input{width:100%;height:28px;padding:0 6px;border-radius:6px;border:.5px solid var(--blue);background:var(--bg);color:var(--text);font-size:12px;font-family:inherit;text-align:right}
+  tr.editing{background:var(--bg-info)}
+  .info-box{background:var(--bg2);border-radius:var(--r);padding:.85rem 1rem;margin-bottom:1rem;font-size:12px;color:var(--text2);line-height:1.7}
+  .info-box strong{color:var(--text)}
+  .yoc-box{background:var(--bg-info);border-radius:var(--r);padding:.85rem 1rem;margin-bottom:1rem;font-size:12px;color:var(--text-info);line-height:1.7;border-left:3px solid var(--blue)}
+  .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:10px}
+  .form-group{display:flex;flex-direction:column;gap:4px}
+  .form-label{font-size:11px;color:var(--text2)}
+  .form-group input,.form-group select{height:36px;padding:0 10px;border-radius:var(--r);border:.5px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;font-family:inherit;width:100%}
+  .btn-primary{height:38px;padding:0 20px;font-size:13px;border-radius:var(--r);border:none;background:var(--text);color:var(--bg);cursor:pointer;font-family:inherit;font-weight:500;width:100%;margin-top:4px}
+  .btn-primary:hover{opacity:.85}
+  .bar-list{display:flex;flex-direction:column;gap:10px}.bar-row{display:flex;align-items:center;gap:10px;font-size:12px}
+  .bar-ticker{width:60px;color:var(--text2);font-size:11px;flex-shrink:0;text-align:right}
+  .bar-track{flex:1;height:22px;background:var(--bg2);border-radius:4px;overflow:hidden}
+  .bar-fill{height:100%;border-radius:4px;transition:width .4s ease}
+  .bar-val{width:70px;font-size:12px;font-weight:500;flex-shrink:0}
+  .legend-row{display:flex;gap:16px;margin-bottom:.85rem;flex-wrap:wrap}
+  .legend-item{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2)}
+  .legend-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+  .cal-month-card{background:var(--bg);border:.5px solid var(--border);border-radius:var(--rl);padding:1.25rem;margin-bottom:.85rem}
+  .cal-item{display:flex;justify-content:space-between;align-items:center;padding:.6rem 0;border-bottom:.5px solid var(--border);gap:1rem}
+  .cal-item:last-child{border-bottom:none}
+  .hist-item{display:flex;justify-content:space-between;align-items:center;padding:.65rem 0;border-bottom:.5px solid var(--border);gap:1rem}
+  .hist-item:last-child{border-bottom:none}
+  .empty-state{text-align:center;padding:3rem 1rem;color:var(--text3);font-size:13px}
+  .footnote{font-size:11px;color:var(--text3);margin-top:.5rem}
+  .toast{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:.6rem 1.25rem;border-radius:99px;font-size:13px;z-index:100;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
+  .toast.show{opacity:1}
+  @media(max-width:600px){.container{padding:1rem}.header{padding:.85rem 1rem}.mg{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<header class="header"><div class="header-inner">
+  <div><div class="app-title">配当ポートフォリオ</div><div class="app-sub">取得ベース配当利回り（YoC）＋ 配当込み実質損益</div></div>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <div style="font-size:11px;color:var(--text3)" id="updated-date"></div>
+    <button class="update-btn" id="update-btn" onclick="updatePrices()">
+      <span class="dot" id="status-dot"></span><span id="update-label">株価を更新</span>
+    </button>
+  </div>
+</div></header>
+<div class="container">
+  <div class="mg" id="summary"></div>
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('holdings')">保有銘柄</button>
+    <button class="tab-btn" onclick="switchTab('calendar')">配当カレンダー</button>
+    <button class="tab-btn" onclick="switchTab('analysis')">利益分析</button>
+    <button class="tab-btn" onclick="switchTab('history')">配当受取履歴</button>
+    <button class="tab-btn" onclick="switchTab('add')">＋ 銘柄追加</button>
+    <button class="tab-btn" onclick="switchTab('settings')">⚙ 設定</button>
+  </div>
+  <div id="pane-holdings"></div>
+  <div id="pane-calendar" style="display:none"></div>
+  <div id="pane-analysis" style="display:none"></div>
+  <div id="pane-history" style="display:none"></div>
+  <div id="pane-add" style="display:none"></div>
+  <div id="pane-settings" style="display:none"></div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const SK='dp-stocks-v4', HK='dp-hist-v2', PK='dp-proxy-url';
+
+const DEF_STOCKS=[
+  {id:1,ticker:'8058',name:'三菱商事',shares:100,buyPrice:3200,currentPrice:2890,annualDividend:150,exDates:['03-31','09-30']},
+  {id:2,ticker:'8316',name:'三井住友FG',shares:200,buyPrice:5800,currentPrice:9800,annualDividend:290,exDates:['03-31','09-30']},
+  {id:3,ticker:'8593',name:'三菱HCキャピタル',shares:500,buyPrice:620,currentPrice:1050,annualDividend:37,exDates:['03-31','09-30']},
+  {id:4,ticker:'8766',name:'東京海上HD',shares:100,buyPrice:3500,currentPrice:5200,annualDividend:121,exDates:['03-31']},
+  {id:5,ticker:'1605',name:'INPEX',shares:300,buyPrice:1200,currentPrice:2100,annualDividend:78,exDates:['03-31','09-30']},
+  {id:6,ticker:'5108',name:'ブリヂストン',shares:100,buyPrice:4200,currentPrice:5100,annualDividend:220,exDates:['06-30','12-31']},
+  {id:7,ticker:'2503',name:'キリンHD',shares:200,buyPrice:1900,currentPrice:2050,annualDividend:65,exDates:['06-30','12-31']},
+];
+
+function load(k,d){try{const s=localStorage.getItem(k);return s?JSON.parse(s):d}catch(e){return d}}
+function save(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+
+let stocks=load(SK,DEF_STOCKS);
+let hist=load(HK,[]);
+const today=new Date();
+
+// 配当履歴から受取配当累計を計算する
+function getReceivedDiv(ticker){
+  return hist.filter(h=>h.ticker===ticker).reduce((a,h)=>a+h.amount,0);
+}
+function getTotalReceived(){
+  return hist.reduce((a,h)=>a+h.amount,0);
+}
+
+function calcStock(s){
+  const cost=s.buyPrice*s.shares, cv=s.currentPrice*s.shares;
+  const rcv=getReceivedDiv(s.ticker);
+  const capGain=cv-cost, totalGain=capGain+rcv;
+  const capPct=(capGain/cost)*100, totalPct=(totalGain/cost)*100;
+  const yocPct=(s.annualDividend/s.buyPrice)*100;
+  const curYield=(s.annualDividend/s.currentPrice)*100;
+  const annualIncome=s.annualDividend*s.shares;
+  const nextEx=nextExDate(s.exDates);
+  const daysUntil=nextEx?Math.ceil((nextEx-today)/864e5):null;
+  return{cost,cv,rcv,capGain,totalGain,capPct,totalPct,yocPct,curYield,annualIncome,nextEx,daysUntil};
+}
+function nextExDate(ex){
+  if(!ex||!ex.length)return null;
+  const yr=today.getFullYear();
+  return ex.map(d=>{const[m,day]=d.split('-').map(Number);let dt=new Date(yr,m-1,day);if(dt<=today)dt=new Date(yr+1,m-1,day);return dt}).sort((a,b)=>a-b)[0];
+}
+
+const fmtYen=n=>'¥'+Math.round(n).toLocaleString('ja-JP');
+const fmtPct=n=>(n>=0?'+':'')+n.toFixed(2)+'%';
+const fmtDate=d=>d?`${d.getMonth()+1}月${d.getDate()}日`:'—';
+
+// ── 株価取得 ──────────────────────────────
+function getProxyUrl(){return localStorage.getItem(PK)||''}
+
+async function fetchPrice(ticker){
+  const proxy=getProxyUrl();
+  // 方法1: Google Apps Scriptプロキシ（設定済みの場合）
+  if(proxy){
+    try{
+      const res=await fetch(proxy+'?ticker='+ticker+'.T',{signal:AbortSignal.timeout(8000)});
+      const data=await res.json();
+      if(data.price&&data.price>0)return data.price;
+    }catch(e){}
+  }
+  // 方法2: stooq（CORSが許可されている場合）
+  try{
+    const res=await fetch(`https://stooq.com/q/l/?s=${ticker}.JP&f=sd2t2ohlcv&h&e=json`,{signal:AbortSignal.timeout(6000)});
+    const data=await res.json();
+    const c=data?.symbols?.[0]?.close;
+    if(c&&parseFloat(c)>0)return parseFloat(c);
+  }catch(e){}
+  // 方法3: Yahoo Finance
+  try{
+    const res=await fetch(`https://query2.finance.yahoo.com/v8/finance/chart/${ticker}.T?interval=1d&range=1d`,{signal:AbortSignal.timeout(6000)});
+    const d=await res.json();
+    const p=d?.chart?.result?.[0]?.meta?.regularMarketPrice;
+    if(p&&p>0)return p;
+  }catch(e){}
+  return null;
+}
+
+async function updatePrices(){
+  const btn=document.getElementById('update-btn'),dot=document.getElementById('status-dot');
+  btn.classList.add('loading');dot.classList.add('pulsing');
+  document.getElementById('update-label').textContent='取得中...';
+  showToast('株価を取得しています...');
+  let ok=0,ng=0;
+  for(const s of stocks){
+    const p=await fetchPrice(s.ticker);
+    if(p){s.currentPrice=Math.round(p);s.priceUpdated=true;ok++}
+    else{s.priceUpdated=false;ng++}
+  }
+  save(SK,stocks);
+  btn.classList.remove('loading');dot.classList.remove('pulsing');
+  document.getElementById('update-label').textContent='株価を更新';
+  const now=new Date();
+  document.getElementById('updated-date').textContent=`${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} 更新`;
+  if(ng===0)showToast(`✓ ${ok}銘柄の株価を更新しました`);
+  else if(ok>0)showToast(`${ok}銘柄更新 / ${ng}銘柄は取得できませんでした`);
+  else showToast('取得失敗。「設定」タブで株価取得の設定を確認してください');
+  renderAll();
+}
+
+function showToast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),4000)}
+
+// ── タブ ─────────────────────────────────
+const TABS=['holdings','calendar','analysis','history','add','settings'];
+let activeTab='holdings',editingId=null;
+
+function switchTab(tab){
+  activeTab=tab;editingId=null;
+  TABS.forEach(t=>{document.getElementById('pane-'+t).style.display=t===tab?'block':'none'});
+  document.querySelectorAll('.tab-btn').forEach((b,i)=>{b.classList.toggle('active',TABS[i]===tab)});
+  renderPane(tab);
+}
+
+function renderPane(t){
+  ({holdings:renderHoldings,calendar:renderCalendar,analysis:renderAnalysis,history:renderHistory,add:renderAdd,settings:renderSettings})[t]();
+}
+function renderAll(){renderSummary();renderPane(activeTab)}
+
+// ── サマリー ──────────────────────────────
+function renderSummary(){
+  if(!stocks.length){document.getElementById('summary').innerHTML='';return}
+  const tCost=stocks.reduce((a,s)=>a+s.buyPrice*s.shares,0);
+  const tCur=stocks.reduce((a,s)=>a+s.currentPrice*s.shares,0);
+  const tRcv=getTotalReceived();
+  const tCap=tCur-tCost,tReal=tCap+tRcv;
+  const tAnnual=stocks.reduce((a,s)=>a+s.annualDividend*s.shares,0);
+  const yoc=tAnnual/tCost*100,curY=tAnnual/tCur*100;
+  const realPct=tReal/tCost*100,capPct=tCap/tCost*100;
+  document.getElementById('summary').innerHTML=`
+    <div class="mc ac"><div class="ml">総資産ベース配当利回り</div><div class="mv">${curY.toFixed(2)}%</div><div class="ms">現在時価 ${fmtYen(tCur)} 基準</div></div>
+    <div class="mc ac"><div class="ml">取得ベース配当利回り（YoC）</div><div class="mv">${yoc.toFixed(2)}%</div><div class="ms">取得原価 ${fmtYen(tCost)} 基準</div></div>
+    <div class="mc"><div class="ml">年間想定配当収入</div><div class="mv">${fmtYen(tAnnual)}</div><div class="ms">月平均 ${fmtYen(tAnnual/12)}</div></div>
+    <div class="mc"><div class="ml">配当込み実質損益 ★</div><div class="mv ${tReal>=0?'pos':'neg'}">${fmtYen(tReal)}</div><div class="ms">株価差益 ${fmtYen(tCap)}＋受取配当 ${fmtYen(tRcv)}</div></div>
+    <div class="mc"><div class="ml">実質トータルリターン ★</div><div class="mv ${realPct>=0?'pos':'neg'}">${fmtPct(realPct)}</div><div class="ms">株価のみ ${fmtPct(capPct)}</div></div>
+    <div class="mc"><div class="ml">受取配当累計（履歴から自動計算）</div><div class="mv pos">${fmtYen(tRcv)}</div><div class="ms">${hist.length}件の記録</div></div>`;
+  if(!document.getElementById('updated-date').textContent){
+    const d=today;document.getElementById('updated-date').textContent=`${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} 時点`;
+  }
+}
+
+// ── 保有銘柄 ──────────────────────────────
+function renderHoldings(){
+  const el=document.getElementById('pane-holdings');
+  if(!stocks.length){el.innerHTML='<div class="empty-state">「＋ 銘柄追加」タブから保有銘柄を追加してください。</div>';return}
+  const rows=stocks.map(s=>{
+    const c=calcStock(s);
+    let badge='—';
+    if(c.daysUntil!==null){
+      if(c.daysUntil<=30)badge=`<span class="badge badge-soon">あと${c.daysUntil}日</span>`;
+      else if(c.daysUntil<=90)badge=`<span class="badge badge-upcoming">${fmtDate(c.nextEx)}</span>`;
+      else badge=`<span class="badge badge-normal">${fmtDate(c.nextEx)}</span>`;
+    }
+    const pt=s.priceUpdated===true?'<span class="tag-auto">● 自動</span>':'';
+    if(editingId===s.id){
+      return `<tr class="editing" id="edit-row-${s.id}">
+        <td style="min-width:160px;padding-left:1.5rem"><div class="tm">${s.ticker}</div><input class="edit-input" style="text-align:left;margin-top:4px" id="e-name" value="${s.name}"></td>
+        <td><input class="edit-input" id="e-shares" type="number" value="${s.shares}" min="0"></td>
+        <td><input class="edit-input" id="e-buy" type="number" value="${s.buyPrice}" min="0"></td>
+        <td><input class="edit-input" id="e-curprice" type="number" value="${s.currentPrice}" min="0"></td>
+        <td style="text-align:center;color:var(--text3);font-size:11px">${fmtYen(c.rcv)}</td>
+        <td colspan="2" style="text-align:center;color:var(--text3);font-size:11px">保存後に再計算</td>
+        <td><input class="edit-input" id="e-div" type="number" step="0.1" value="${s.annualDividend}" min="0"></td>
+        <td><input class="edit-input" id="e-exdates" style="width:110px;text-align:left" value="${(s.exDates||[]).join(',')}"></td>
+        <td style="text-align:right"><div style="display:flex;gap:4px;justify-content:flex-end"><button class="save-btn" onclick="saveEdit(${s.id})">保存</button><button class="cancel-btn" onclick="cancelEdit()">×</button></div></td>
+      </tr>`;
+    }
+    return `<tr>
+      <td style="min-width:160px;padding-left:1.5rem"><div class="tm">${s.ticker} <span class="tag-yoc">YoC</span></div><div class="ts">${s.name}</div><div style="font-size:10px;color:var(--text3);margin-top:3px">取得 ${fmtYen(s.buyPrice)} → 現在 ${fmtYen(s.currentPrice)}${pt}</div></td>
+      <td>${s.shares.toLocaleString()}<div class="ts">株</div></td>
+      <td>${fmtYen(c.cost)}</td>
+      <td><span class="${c.capPct>=0?'pos':'neg'}">${fmtPct(c.capPct)}</span><div class="ts">${fmtYen(c.capGain)}</div></td>
+      <td style="color:var(--text-info)">${fmtYen(c.rcv)}<div class="ts">受取累計</div></td>
+      <td><span class="${c.totalPct>=0?'pos':'neg'}" style="font-weight:500">${fmtPct(c.totalPct)}</span><div class="ts">${fmtYen(c.totalGain)}</div></td>
+      <td style="font-weight:500;color:var(--text-info)">${c.yocPct.toFixed(2)}%</td>
+      <td>${fmtYen(c.annualIncome)}<div class="ts">年間</div></td>
+      <td>${badge}</td>
+      <td><div style="display:flex;gap:4px;justify-content:flex-end"><button class="edit-btn" onclick="startEdit(${s.id})">編集</button><button class="del-btn" onclick="deleteStock(${s.id})">×</button></div></td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML=`
+    <div class="yoc-box"><strong>YoC（Yield on Cost）とは？</strong>「取得ベース配当利回り」のこと。現在の株価ではなく<strong>あなたが買ったときの株価</strong>で配当利回りを計算します。長期保有で株価が上がるほどYoCは高くなり、投資の成果が見えやすくなります。</div>
+    <div class="info-box"><strong>配当込み実質損益 ★</strong> ＝ 株価上昇益 ＋ 受取配当累計。受取配当累計は「配当受取履歴」タブに記録した金額から自動計算されます。</div>
+    <div class="card" style="padding:0"><div class="table-wrap"><table><thead><tr>
+      <th style="padding-left:1.5rem;min-width:160px">銘柄</th><th>保有株数</th><th>取得総額</th><th>株価損益</th><th>受取配当累計</th><th>配当込み損益 ★</th><th>YoC</th><th>年間配当</th><th>次回権利日</th><th style="text-align:right;padding-right:1rem">操作</th>
+    </tr></thead><tbody>${rows}</tbody></table></div></div>
+    <p class="footnote">★ 独自指標。受取配当累計は「配当受取履歴」タブの記録から自動で反映されます。</p>`;
+}
+
+function startEdit(id){editingId=id;renderHoldings();const r=document.getElementById('edit-row-'+id);if(r)r.scrollIntoView({behavior:'smooth',block:'center'})}
+function cancelEdit(){editingId=null;renderHoldings()}
+function saveEdit(id){
+  const s=stocks.find(s=>s.id===id);if(!s)return;
+  const name=document.getElementById('e-name').value.trim();
+  const shares=parseFloat(document.getElementById('e-shares').value)||0;
+  const buyPrice=parseFloat(document.getElementById('e-buy').value)||0;
+  const curPrice=parseFloat(document.getElementById('e-curprice').value)||0;
+  const annDiv=parseFloat(document.getElementById('e-div').value)||0;
+  const exRaw=document.getElementById('e-exdates').value.trim();
+  const exDates=exRaw?exRaw.split(',').map(d=>d.trim()).filter(Boolean):[];
+  if(!name||!shares||!buyPrice||!curPrice){alert('銘柄名・株数・取得単価・現在株価は必須です');return}
+  s.name=name;s.shares=shares;s.buyPrice=buyPrice;s.currentPrice=curPrice;s.annualDividend=annDiv;s.exDates=exDates;
+  editingId=null;save(SK,stocks);renderAll();showToast(`${s.name} を更新しました`);
+}
+
+// ── 配当カレンダー ─────────────────────────
+function renderCalendar(){
+  const el=document.getElementById('pane-calendar');
+  if(!stocks.length){el.innerHTML='<div class="empty-state">保有銘柄を追加してください。</div>';return}
+  const months=Array.from({length:12},(_,i)=>({m:i+1,items:[]}));
+  stocks.forEach(s=>{(s.exDates||[]).forEach(d=>{const[mS,dS]=d.split('-');const m=parseInt(mS),day=parseInt(dS);const income=Math.round(s.annualDividend/s.exDates.length*s.shares);months[m-1].items.push({...s,day,income})})});
+  const tA=stocks.reduce((a,s)=>a+s.annualDividend*s.shares,0);
+  const active=months.filter(m=>m.items.length);
+  let html=`<div class="mg" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.25rem">
+    <div class="mc"><div class="ml">年間配当収入（想定）</div><div class="mv">${fmtYen(tA)}</div></div>
+    <div class="mc"><div class="ml">月平均配当収入</div><div class="mv">${fmtYen(tA/12)}</div></div>
+    <div class="mc"><div class="ml">配当支払い月数</div><div class="mv">${active.length}ヶ月</div></div></div>`;
+  html+=active.map(mth=>{
+    const mI=mth.items.reduce((a,s)=>a+s.income,0);
+    const items=mth.items.map(s=>{const dt=new Date(today.getFullYear(),mth.m-1,s.day);const dl=Math.ceil((dt-today)/864e5);const soon=dl>=0&&dl<=30?`<span class="badge badge-soon" style="margin-left:6px">あと${dl}日</span>`:'';
+      return `<div class="cal-item"><div><div style="font-size:13px;font-weight:500">${s.ticker}　${s.name}${soon}</div><div style="font-size:11px;color:var(--text3)">${mth.m}/${s.day} 権利落ち予定</div></div><div style="text-align:right"><div style="font-size:13px;font-weight:500">${fmtYen(s.income)}</div><div style="font-size:11px;color:var(--text3)">1株 ${fmtYen(s.annualDividend/s.exDates.length)}</div></div></div>`}).join('');
+    return `<div class="cal-month-card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.85rem"><div style="font-weight:500;font-size:15px">${mth.m}月</div><div style="font-size:14px;font-weight:500;color:var(--text-info)">${fmtYen(mI)}</div></div>${items}</div>`}).join('');
+  el.innerHTML=html;
+}
+
+// ── 利益分析 ──────────────────────────────
+function renderAnalysis(){
+  const el=document.getElementById('pane-analysis');
+  if(!stocks.length){el.innerHTML='<div class="empty-state">保有銘柄を追加してください。</div>';return}
+  const calced=stocks.map(s=>({...s,...calcStock(s)}));
+  const sR=[...calced].sort((a,b)=>b.totalPct-a.totalPct);
+  const maxR=Math.max(...sR.map(s=>Math.abs(s.totalPct)),...sR.map(s=>Math.abs(s.capPct)),1);
+  const retBars=sR.map(s=>`<div class="bar-row"><div class="bar-ticker">${s.ticker}</div><div style="flex:1"><div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><div class="bar-track"><div class="bar-fill" style="width:${Math.abs(s.totalPct)/maxR*100}%;background:${s.totalPct>=0?'#1d9e75':'#e24b4a'}"></div></div><div class="bar-val ${s.totalPct>=0?'pos':'neg'}">${fmtPct(s.totalPct)}</div></div><div style="display:flex;align-items:center;gap:6px"><div class="bar-track"><div class="bar-fill" style="width:${Math.abs(s.capPct)/maxR*100}%;background:#b4b2a9"></div></div><div class="bar-val" style="color:var(--text3);font-weight:400">${fmtPct(s.capPct)}</div></div></div></div>`).join('');
+  const sY=[...calced].sort((a,b)=>b.yocPct-a.yocPct);
+  const maxY=Math.max(...sY.map(s=>s.yocPct),1);
+  const yocBars=sY.map(s=>`<div class="bar-row"><div class="bar-ticker">${s.ticker}</div><div class="bar-track"><div class="bar-fill" style="width:${s.yocPct/maxY*100}%;background:#185fa5"></div></div><div class="bar-val" style="color:var(--text-info)">${s.yocPct.toFixed(2)}%</div></div>`).join('');
+  el.innerHTML=`
+    <div class="card"><div class="sl">配当込み実質リターン vs 株価のみリターン</div><div class="legend-row"><div class="legend-item"><div class="legend-dot" style="background:#1d9e75"></div>配当込み実質リターン ★</div><div class="legend-item"><div class="legend-dot" style="background:#b4b2a9"></div>株価のみリターン</div></div><div class="bar-list">${retBars}</div></div>
+    <div class="card"><div class="sl">YoC（取得ベース配当利回り）ランキング</div><div class="bar-list">${yocBars}</div><p class="footnote" style="margin-top:.75rem">YoC = 年間配当 ÷ 取得単価。買値が安いほど高くなる。</p></div>`;
+}
+
+// ── 配当受取履歴 ──────────────────────────
+function renderHistory(){
+  const el=document.getElementById('pane-history');
+  const totalH=getTotalReceived();
+  const byYear={};hist.forEach(h=>{const yr=h.date.slice(0,4);byYear[yr]=(byYear[yr]||0)+h.amount});
+  const yearSummary=Object.entries(byYear).sort((a,b)=>b[0]-a[0]).map(([yr,amt])=>`<div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:.5px solid var(--border);font-size:13px"><span style="color:var(--text2)">${yr}年</span><span style="font-weight:500">${fmtYen(amt)}</span></div>`).join('')||'<div style="font-size:13px;color:var(--text3);padding:.5rem 0">記録なし</div>';
+  const histItems=[...hist].sort((a,b)=>b.date.localeCompare(a.date)).map(h=>`
+    <div class="hist-item"><div><div style="font-size:13px;font-weight:500">${h.ticker}　${h.stockName}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">${h.date}　${h.memo||''}</div></div><div style="display:flex;align-items:center;gap:8px"><div style="font-size:14px;font-weight:500;color:var(--green)">${fmtYen(h.amount)}</div><button class="del-btn" onclick="deleteHistory('${h.id}')">×</button></div></div>`).join('')||'<div class="empty-state">配当の受取記録がありません。<br>下のフォームから追加すると、保有銘柄タブの「受取配当累計」と「配当込み損益」に自動で反映されます。</div>';
+  el.innerHTML=`
+    <div class="info-box"><strong>配当受取履歴の仕組み</strong>：ここに記録した配当金は、保有銘柄タブの「受取配当累計」列と「配当込み損益 ★」に自動で反映されます。銘柄ごとに集計されるので、証券コードが一致していれば正確に連動します。</div>
+    <div class="mg" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.25rem">
+      <div class="mc ac"><div class="ml">受取配当累計</div><div class="mv">${fmtYen(totalH)}</div><div class="ms">${hist.length}件合計</div></div>
+      <div class="mc"><div class="ml">年別受取状況</div><div style="margin-top:.5rem">${yearSummary}</div></div>
+      <div class="mc"><div class="ml">最多受取銘柄</div><div class="mv" style="font-size:16px">${topStock()}</div></div>
+    </div>
+    <div class="card"><div class="sl">配当を記録する</div>
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label">銘柄を選ぶ *</label><select id="h-ticker"><option value="">選択してください</option>${stocks.map(s=>`<option value="${s.ticker}|${s.name}">${s.ticker}　${s.name}</option>`).join('')}</select></div>
+        <div class="form-group"><label class="form-label">受取日 *</label><input id="h-date" type="date" value="${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}"></div>
+        <div class="form-group"><label class="form-label">受取金額（税引後・円）*</label><input id="h-amount" type="number" placeholder="例: 15000" min="0"></div>
+        <div class="form-group"><label class="form-label">メモ（任意）</label><input id="h-memo" placeholder="例: 2025年中間配当"></div>
+      </div>
+      <button class="btn-primary" onclick="addHistory()">記録する</button>
+    </div>
+    <div class="card"><div class="sl">受取履歴</div>${histItems}</div>`;
+}
+function topStock(){if(!hist.length)return'—';const bt={};hist.forEach(h=>{bt[h.ticker]=(bt[h.ticker]||0)+h.amount});const top=Object.entries(bt).sort((a,b)=>b[1]-a[1])[0];return top?`${top[0]}　${fmtYen(top[1])}`:'—'}
+function addHistory(){
+  const tv=document.getElementById('h-ticker').value,date=document.getElementById('h-date').value;
+  const amount=parseFloat(document.getElementById('h-amount').value)||0,memo=document.getElementById('h-memo').value.trim();
+  if(!tv||!date||!amount){alert('銘柄・受取日・金額は必須です');return}
+  const[ticker,stockName]=tv.split('|');
+  hist.push({id:Date.now().toString(),ticker,stockName,date,amount,memo});
+  save(HK,hist);renderAll();showToast(`${stockName} の配当 ${fmtYen(amount)} を記録しました → 損益に自動反映`);
+}
+function deleteHistory(id){if(!confirm('この記録を削除してよいですか？'))return;hist=hist.filter(h=>h.id!==id);save(HK,hist);renderAll()}
+
+// ── 銘柄追加 ──────────────────────────────
+function renderAdd(){
+  const el=document.getElementById('pane-add');
+  const list=stocks.map(s=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:.6rem 0;border-bottom:.5px solid var(--border)"><div><span style="font-weight:500">${s.ticker}</span><span style="color:var(--text2);font-size:13px;margin-left:8px">${s.name}</span><span style="color:var(--text3);font-size:12px;margin-left:8px">${s.shares}株</span></div><button class="del-btn" onclick="deleteStock(${s.id})">× 削除</button></div>`).join('')||'<div style="font-size:13px;color:var(--text3);padding:.75rem 0">まだ銘柄がありません</div>';
+  el.innerHTML=`
+    <div class="card"><div class="sl">新規銘柄を追加</div>
+      <div class="form-grid">
+        <div class="form-group"><label class="form-label">証券コード *</label><input id="f-ticker" placeholder="例: 8058" maxlength="10"></div>
+        <div class="form-group" style="grid-column:span 2"><label class="form-label">銘柄名 *</label><input id="f-name" placeholder="例: 三菱商事"></div>
+        <div class="form-group"><label class="form-label">保有株数 *</label><input id="f-shares" type="number" placeholder="例: 100" min="1"></div>
+        <div class="form-group"><label class="form-label">取得単価（円）*</label><input id="f-buy" type="number" placeholder="例: 3200" min="0"></div>
+        <div class="form-group"><label class="form-label">現在株価（円）*</label><input id="f-current" type="number" placeholder="例: 2890" min="0"></div>
+        <div class="form-group"><label class="form-label">1株年間配当（円）</label><input id="f-div" type="number" step="0.1" placeholder="例: 150" min="0"></div>
+        <div class="form-group" style="grid-column:span 2"><label class="form-label">権利落ち日（MM-DD、カンマ区切り）</label><input id="f-exdates" placeholder="例: 03-31,09-30"></div>
+      </div>
+      <button class="btn-primary" onclick="addStock()">追加する</button>
+      <p class="footnote" style="margin-top:.6rem">* は必須。追加後は「保有銘柄」タブの「編集」で変更可。配当金は「配当受取履歴」タブで記録してください。</p>
+    </div>
+    <div class="card"><div class="sl">現在の保有銘柄</div>${list}</div>`;
+}
+function addStock(){
+  const ticker=document.getElementById('f-ticker').value.trim(),name=document.getElementById('f-name').value.trim();
+  const shares=parseFloat(document.getElementById('f-shares').value)||0,buyPrice=parseFloat(document.getElementById('f-buy').value)||0;
+  const curPrice=parseFloat(document.getElementById('f-current').value)||0,annDiv=parseFloat(document.getElementById('f-div').value)||0;
+  const exRaw=document.getElementById('f-exdates').value.trim();
+  const exDates=exRaw?exRaw.split(',').map(d=>d.trim()).filter(Boolean):[];
+  if(!ticker||!name||!shares||!buyPrice||!curPrice){alert('証券コード・銘柄名・株数・取得単価・現在株価は必須です');return}
+  stocks.push({id:Date.now(),ticker,name,shares,buyPrice,currentPrice:curPrice,annualDividend:annDiv,exDates});
+  save(SK,stocks);renderAll();showToast(`${name} を追加しました`);
+}
+function deleteStock(id){const s=stocks.find(s=>s.id===id);if(!s||!confirm(`「${s.name}」を削除してよいですか？`))return;stocks=stocks.filter(s=>s.id!==id);save(SK,stocks);renderAll()}
+
+// ── 設定 ──────────────────────────────────
+function renderSettings(){
+  const el=document.getElementById('pane-settings');
+  const currentProxy=getProxyUrl();
+  el.innerHTML=`
+    <div class="card">
+      <div class="sl">株価自動取得の設定</div>
+      <div class="info-box">
+        <strong>なぜ株価が取得できないのか？</strong><br>
+        ブラウザのセキュリティ機能により、このアプリから直接Yahoo Financeなどにアクセスすることが制限されています。
+        この制限を回避するには「Google Apps Script」という無料の中継サービスを使います。<br><br>
+        <strong>設定手順（5分・無料）</strong><br>
+        ① Googleアカウントでログインした状態で <strong>script.google.com</strong> にアクセス<br>
+        ② 「新しいプロジェクト」をクリック<br>
+        ③ 最初から書いてある文字を全部消して、下のコードを貼り付ける<br>
+        ④ 「デプロイ」→「新しいデプロイ」→ 種類で「ウェブアプリ」を選択<br>
+        ⑤ 「アクセスできるユーザー」を「全員」に変更<br>
+        ⑥ 「デプロイ」をクリック→ 表示されたURLをコピー<br>
+        ⑦ 下の入力欄にそのURLを貼り付けて「保存」<br>
+      </div>
+      <div class="card" style="background:var(--bg2);border:1px dashed var(--border)">
+        <div class="sl">Google Apps Scriptに貼り付けるコード</div>
+        <pre style="font-size:11px;line-height:1.6;color:var(--text);overflow-x:auto;white-space:pre-wrap;word-break:break-all;font-family:monospace">function doGet(e) {
+  var ticker = e.parameter.ticker || '8058.T';
+  var url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '?interval=1d&range=1d';
+  var res = UrlFetchApp.fetch(url, {muteHttpExceptions: true});
+  var json = JSON.parse(res.getContentText());
+  var price = json.chart.result[0].meta.regularMarketPrice;
+  return ContentService.createTextOutput(
+    JSON.stringify({ticker: ticker, price: price})
+  ).setMimeType(ContentService.MimeType.JSON);
+}</pre>
+      </div>
+      <div class="form-grid" style="margin-top:1rem">
+        <div class="form-group" style="grid-column:span 3">
+          <label class="form-label">Google Apps ScriptのURL（デプロイ後に発行されるURL）</label>
+          <input id="proxy-url" placeholder="https://script.google.com/macros/s/xxxxxx/exec" value="${currentProxy}">
+        </div>
+      </div>
+      <button class="btn-primary" onclick="saveProxy()">URLを保存</button>
+      ${currentProxy?`<p class="footnote" style="margin-top:.6rem;color:var(--green)">✓ 設定済み。「株価を更新」ボタンが使えます。</p>`:`<p class="footnote" style="margin-top:.6rem">まだ設定されていません。上の手順に従ってURLを発行してください。</p>`}
+    </div>
+    <div class="card">
+      <div class="sl">データのリセット</div>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:.75rem">すべてのデータ（保有銘柄・配当履歴）を初期状態に戻します。この操作は元に戻せません。</p>
+      <button class="btn-primary" style="background:var(--red)" onclick="resetAll()">すべてのデータをリセット</button>
+    </div>`;
+}
+function saveProxy(){
+  const url=document.getElementById('proxy-url').value.trim();
+  if(url)localStorage.setItem(PK,url);else localStorage.removeItem(PK);
+  renderSettings();showToast(url?'✓ 株価取得URLを保存しました':'URLを削除しました');
+}
+function resetAll(){
+  if(!confirm('本当にすべてのデータをリセットしますか？'))return;
+  localStorage.removeItem(SK);localStorage.removeItem(HK);
+  stocks=DEF_STOCKS;hist=[];save(SK,stocks);
+  renderAll();showToast('データをリセットしました');
+}
+
+renderAll();
+</script>
+</body>
+</html>

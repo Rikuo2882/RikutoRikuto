@@ -152,6 +152,25 @@ migrateOldData();
 let stocks=load(SK,DEF_STOCKS),hist=load(HK,DEF_HIST);
 const today=new Date();
 
+// 米国株で円とドルが混在してしまったデータを自動修正
+function sanitizeUSD(){
+  const r=parseFloat(localStorage.getItem(RK))||150;
+  let fixed=false;
+  stocks.forEach(s=>{
+    if((s.currency||'JPY')!=='USD')return;
+    // 配当利回りが50%超 → 配当が円のまま入っている
+    if(s.currentPrice>0&&s.annualDividend/s.currentPrice>0.5){
+      s.annualDividend=Math.round(s.annualDividend/r*100)/100;fixed=true;
+    }
+    // 取得単価が現在株価の5倍超 → 取得単価が円のまま入っている
+    if(s.currentPrice>0&&s.buyPrice/s.currentPrice>5){
+      s.buyPrice=Math.round(s.buyPrice/r*100)/100;fixed=true;
+    }
+  });
+  if(fixed){save(SK,stocks);setTimeout(()=>{try{showToast('✓ 米国株の通貨単位を自動修正しました')}catch(e){}},600)}
+}
+sanitizeUSD();
+
 function getRate(){const r=parseFloat(localStorage.getItem(RK));return r&&r>0?r:150}
 function curOf(s){return s.currency||'JPY'}
 function isUSTicker(t){return /^[A-Za-z][A-Za-z0-9.\-]*$/.test(t)}
@@ -251,35 +270,49 @@ async function fetchStockData(s){
   }catch(e){return{price:null,dividend:null,currency:null}}
 }
 
-// 投資信託（投信協会の公開CSVから基準価額・分配金を取得）
+// 投資信託（投信協会CSV → Yahoo!ファイナンスの順に試行）
 async function fetchFundData(code){
-  const url=`https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=&associFundCd=${encodeURIComponent(code)}`;
-  const res=await fetchViaProxies(url);
-  if(!res)return{price:null,dividend:null};
-  try{
-    const text=await res.text();
-    const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l&&l.includes(','));
-    if(lines.length<2)return{price:null,dividend:null};
-    // 最終行が最新の基準価額
-    const last=lines[lines.length-1].split(',');
-    const price=parseFloat(last[1]);
-    // 過去1年の分配金合計
-    let dividend=0;const exSet=new Set();
-    const oneYearAgo=new Date();oneYearAgo.setFullYear(oneYearAgo.getFullYear()-1);
-    for(const line of lines.slice(1)){
-      const cols=line.split(',');
-      const dm=cols[0].match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
-      if(!dm)continue;
-      const dt=new Date(parseInt(dm[1]),parseInt(dm[2])-1,parseInt(dm[3]));
-      const div=parseFloat(cols[3]);
-      if(dt>=oneYearAgo&&div&&div>0){
-        dividend+=div;
-        exSet.add(String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'));
+  // ① 投信協会CSV（パラメータ2パターン試行）
+  const csvUrls=[
+    `https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?isinCd=&associFundCd=${encodeURIComponent(code)}`,
+    `https://toushin-lib.fwg.ne.jp/FdsWeb/FDST030000/csv-file-download?associFundCd=${encodeURIComponent(code)}`
+  ];
+  for(const u of csvUrls){
+    const res=await fetchViaProxies(u);
+    if(!res)continue;
+    try{
+      const text=await res.text();
+      const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l&&l.includes(','));
+      if(lines.length<2)continue;
+      const last=lines[lines.length-1].split(',');
+      const price=parseFloat((last[1]||'').replace(/[^0-9.]/g,''));
+      let dividend=0;const exSet=new Set();
+      const oneYearAgo=new Date();oneYearAgo.setFullYear(oneYearAgo.getFullYear()-1);
+      for(const line of lines.slice(1)){
+        const cols=line.split(',');
+        const dm=cols[0].match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+        if(!dm)continue;
+        const dt=new Date(+dm[1],+dm[2]-1,+dm[3]);
+        const div=parseFloat((cols[3]||'').replace(/[^0-9.]/g,''));
+        if(dt>=oneYearAgo&&div>0){dividend+=div;exSet.add(String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'))}
       }
+      if(price&&price>0){
+        const ex=[...exSet].sort();
+        return{price,dividend:dividend>0?Math.round(dividend*10)/10:null,exDates:ex.length?ex:null};
+      }
+    }catch(e){}
+  }
+  // ② Yahoo!ファイナンス（日本）のファンドページから基準価額を抽出
+  try{
+    const res=await fetchViaProxies(`https://finance.yahoo.co.jp/quote/${encodeURIComponent(code)}`);
+    if(res){
+      const html=await res.text();
+      let m=html.match(/"price"\s*:\s*"?([0-9][0-9,]*\.?[0-9]*)/);
+      if(!m)m=html.match(/基準価額[\s\S]{0,300}?([0-9][0-9,]{3,})/);
+      if(m){const p=parseFloat(m[1].replace(/,/g,''));if(p>0)return{price:p,dividend:null,exDates:null}}
     }
-    const exDates=[...exSet].sort();
-    return{price:price&&price>0?price:null,dividend:dividend>0?Math.round(dividend*10)/10:null,exDates:exDates.length?exDates:null};
-  }catch(e){return{price:null,dividend:null}}
+  }catch(e){}
+  return{price:null,dividend:null,exDates:null};
 }
 
 async function updatePrices(){
@@ -297,14 +330,21 @@ async function updatePrices(){
     let data;
     if(s.isFund){data=await fetchFundData(s.ticker)}
     else{data=await fetchStockData(s)}
+    // 通貨がJPY→USDに切り替わった場合、円で入力済みの取得単価・配当をドルに自動換算
+    if(data.currency==='USD'&&curOf(s)!=='USD'){
+      const r=getRate();
+      s.buyPrice=Math.round(s.buyPrice/r*100)/100;
+      if(!(data.dividend&&data.dividend>0))s.annualDividend=Math.round(s.annualDividend/r*100)/100;
+      s.currency='USD';
+    }
     if(data.price){
       s.currentPrice=curOf(s)==='USD'||s.isFund?Math.round(data.price*100)/100:Math.round(data.price);
-      if(data.currency==='USD')s.currency='USD';
       s.priceUpdated=true;ok++;
     }else{s.priceUpdated=false;ng++}
     if(data.dividend&&data.dividend>0)s.annualDividend=data.dividend;
     if(data.exDates&&data.exDates.length)s.exDates=data.exDates;
   }
+  sanitizeUSD();
   save(SK,stocks);btn.classList.remove('loading');dot.classList.remove('pulsing');
   document.getElementById('update-label').textContent='株価を更新';
   const now=new Date();document.getElementById('updated-date').textContent=`${now.getHours()}:${String(now.getMinutes()).padStart(2,'0')} 更新（$1=¥${getRate().toFixed(1)}）`;
@@ -378,14 +418,14 @@ function renderHoldings(){
         <td colspan="3" style="text-align:center;font-size:11px;color:var(--text3)">保存後に再計算</td>
         <td><input class="edit-input" id="e-buy" type="number" step="0.01" value="${s.buyPrice}" min="0"></td>
         <td><input class="edit-input" id="e-curprice" type="number" step="0.01" value="${s.currentPrice}" min="0"></td>
-        <td colspan="2" style="text-align:center;font-size:11px;color:var(--text3)">—</td>
+        <td colspan="2"><select class="edit-input" id="e-account" style="text-align:left">${['特定口座','NISA','旧NISA','一般口座'].map(a=>`<option value="${a}"${(s.account||'特定口座')===a?' selected':''}>${a}</option>`).join('')}</select></td>
         <td><input class="edit-input" id="e-div" type="number" step="0.01" value="${s.annualDividend}" min="0"></td>
         <td colspan="2"><input class="edit-input" id="e-exdates" style="text-align:left" value="${(s.exDates||[]).join(',')}" placeholder="03-31,09-30"></td>
         <td><div style="display:flex;gap:4px;justify-content:flex-end"><button class="save-btn" onclick="saveEdit(${s.id})">保存</button><button class="cancel-btn" onclick="cancelEdit()">×</button></div></td>
       </tr>`;
     }
     return`<tr>
-      <td style="min-width:130px;padding-left:1rem"><div class="tm">${s.ticker}${s.isFund?' <span class="tag-yoc">投信</span>':''}${c.cur==='USD'?' <span class="tag-yoc">$</span>':''}</div><div class="ts">${s.name}</div></td>
+      <td style="min-width:130px;padding-left:1rem"><div class="tm">${s.ticker}${s.isFund?' <span class="tag-yoc">投信</span>':''}${c.cur==='USD'?' <span class="tag-yoc">$</span>':''}</div><div class="ts">${s.name}${s.account?` <span class="badge badge-upcoming" style="font-size:9px">${s.account}</span>`:''}</div></td>
       <td>${s.shares.toLocaleString()}<div class="ts">${s.isFund?'万口':'株'}</div></td>
       <td>${m(c.mv)}<div class="ts">時価</div></td>
       <td>${c.curYield.toFixed(2)}%<div class="ts">現在利回り</div></td>
@@ -424,7 +464,9 @@ function saveEdit(id){
   const annDiv=parseFloat(document.getElementById('e-div').value)||0;
   const exRaw=document.getElementById('e-exdates').value.trim(),exDates=exRaw?exRaw.split(',').map(d=>d.trim()).filter(Boolean):[];
   if(!name||!shares||!buyPrice||!curPrice){alert('必須項目を入力してください');return}
+  const accEl=document.getElementById('e-account');
   s.name=name;s.shares=shares;s.buyPrice=buyPrice;s.currentPrice=curPrice;s.annualDividend=annDiv;s.exDates=exDates;
+  if(accEl)s.account=accEl.value;
   editingId=null;save(SK,stocks);renderAll();showToast(`${s.name} を更新しました`);
 }
 
@@ -455,6 +497,8 @@ function renderAnalysis(){
   const yocBars=sY.map(s=>`<div class="bar-row"><div class="bar-ticker">${s.name}</div><div class="bar-track"><div class="bar-fill" style="width:${s.yocPct/maxY*100}%;background:#185fa5"></div></div><div class="bar-val" style="color:var(--text-info)">${s.yocPct.toFixed(2)}%</div></div>`).join('');
   const divData=calced.filter(s=>s.annualIncome>0).map(s=>({label:s.name,value:toJPY(s.annualIncome,s.cur)})).sort((a,b)=>b.value-a.value);
   const mvData=calced.filter(s=>s.mv>0).map(s=>({label:s.name,value:toJPY(s.mv,s.cur)})).sort((a,b)=>b.value-a.value);
+  const accMap={};calced.forEach(s=>{const a=s.account||'未設定';accMap[a]=(accMap[a]||0)+toJPY(s.mv,s.cur)});
+  const accData=Object.entries(accMap).map(([label,value])=>({label,value})).sort((a,b)=>b.value-a.value);
   el.innerHTML=`
     <div class="card"><div class="sl">配当込み実質リターン vs 株価のみリターン</div>
       <div class="legend-row"><div class="legend-item"><div class="legend-dot" style="background:#1d9e75"></div>配当込み実質リターン ★</div><div class="legend-item"><div class="legend-dot" style="background:#b4b2a9"></div>株価のみリターン</div></div>
@@ -464,6 +508,7 @@ function renderAnalysis(){
       <div class="pie-container">
         <div class="pie-wrap"><div style="font-size:13px;font-weight:500;margin-bottom:.75rem;text-align:center">年間配当の銘柄別割合</div>${pieChart(divData)}<div class="pie-legend">${pieLegend(divData)}</div></div>
         <div class="pie-wrap"><div style="font-size:13px;font-weight:500;margin-bottom:.75rem;text-align:center">保有資産の銘柄別割合</div>${pieChart(mvData)}<div class="pie-legend">${pieLegend(mvData)}</div></div>
+        <div class="pie-wrap"><div style="font-size:13px;font-weight:500;margin-bottom:.75rem;text-align:center">口座区分別の資産割合</div>${pieChart(accData)}<div class="pie-legend">${pieLegend(accData)}</div></div>
       </div></div>`;
 }
 
@@ -533,6 +578,7 @@ function renderAdd(){
     <div class="card"><div class="sl">新規銘柄を追加</div>
       <div class="form-grid">
         <div class="form-group"><label class="form-label">種類</label><select id="f-type"><option value="jp">日本株</option><option value="us">米国株</option><option value="fund">投資信託</option></select></div>
+        <div class="form-group"><label class="form-label">口座区分</label><select id="f-account"><option value="特定口座">特定口座</option><option value="NISA">NISA</option><option value="旧NISA">旧NISA</option><option value="一般口座">一般口座</option></select></div>
         <div class="form-group"><label class="form-label">コード *</label><input id="f-ticker" placeholder="日本株:8306 / 米国株:AAPL / 投信:協会コード"></div>
         <div class="form-group" style="grid-column:span 2"><label class="form-label">銘柄名 *</label><input id="f-name" placeholder="例: 三菱UFJ FG"></div>
         <div class="form-group"><label class="form-label">保有数（投信は万口）*</label><input id="f-shares" type="number" step="0.0001" placeholder="例: 100" min="0.0001"></div>
@@ -543,7 +589,10 @@ function renderAdd(){
       </div>
       <button class="btn-primary" onclick="addStock()">追加する</button>
       <div class="info-box" style="margin-top:1rem;margin-bottom:0">
-        <strong>投資信託の協会コードの調べ方</strong>：投資信託協会のサイト（toushin-lib.fwg.ne.jp）や、目論見書・証券会社の商品ページに記載されている8桁の英数字（例: 0331418A）です。eMAXIS Slimなど人気銘柄は「ファンド名 協会コード」で検索すればすぐ見つかります。<br><br>
+        <strong>投資信託の協会コードの調べ方</strong>：投資信託協会のサイト（toushin-lib.fwg.ne.jp）や、目論見書・証券会社の商品ページに記載されている8桁の英数字です。「ファンド名 協会コード」で検索してもすぐ見つかります。<br><br>
+        <strong>代表的な協会コードの例</strong>：<br>
+        ・eMAXIS Slim 全世界株式（オール・カントリー）→ <strong>0331418A</strong><br>
+        ・eMAXIS Slim 米国株式（S&P500）→ <strong>03311187</strong><br><br>
         <strong>米国株</strong>：ティッカー（AAPL等）で追加。取得単価もドルで入力してください。表示はすべてドル建て、サマリー合計のみ円換算されます。
       </div>
     </div>
@@ -556,7 +605,8 @@ function addStock(){
   const curPrice=parseFloat(document.getElementById('f-current').value)||0,annDiv=parseFloat(document.getElementById('f-div').value)||0;
   const exRaw=document.getElementById('f-exdates').value.trim(),exDates=exRaw?exRaw.split(',').map(d=>d.trim()).filter(Boolean):[];
   if(!ticker||!name||!shares||!buyPrice||!curPrice){alert('必須項目を入力してください（現在株価は仮の値でもOK。更新ボタンで自動取得されます）');return}
-  const stock={id:Date.now(),ticker,name,shares,buyPrice,currentPrice:curPrice,annualDividend:annDiv,exDates,isFund:type==='fund'};
+  const account=document.getElementById('f-account').value;
+  const stock={id:Date.now(),ticker,name,shares,buyPrice,currentPrice:curPrice,annualDividend:annDiv,exDates,isFund:type==='fund',account};
   if(type==='us')stock.currency='USD';
   stocks.push(stock);
   save(SK,stocks);renderAll();showToast(`${name} を追加しました`);

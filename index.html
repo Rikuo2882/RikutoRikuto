@@ -237,13 +237,17 @@ async function fetchStockData(s){
     const result=d?.chart?.result?.[0];
     const price=result?.meta?.regularMarketPrice;
     const currency=result?.meta?.currency||null;
-    let dividend=null;
+    let dividend=null,exDates=null;
     if(result?.events?.dividends){
       const oneYearAgo=Date.now()/1000-365*86400;
-      dividend=Object.values(result.events.dividends).filter(x=>x.date>=oneYearAgo).reduce((a,x)=>a+x.amount,0);
+      const recent=Object.values(result.events.dividends).filter(x=>x.date>=oneYearAgo);
+      dividend=recent.reduce((a,x)=>a+x.amount,0);
       dividend=Math.round(dividend*100)/100;
+      // 権利落ち日を過去の配当イベントから自動設定（MM-DD形式）
+      const dates=recent.map(x=>{const d=new Date(x.date*1000);return String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')});
+      exDates=[...new Set(dates)].sort();
     }
-    return{price:price||null,dividend:dividend||null,currency};
+    return{price:price||null,dividend:dividend||null,currency,exDates:exDates&&exDates.length?exDates:null};
   }catch(e){return{price:null,dividend:null,currency:null}}
 }
 
@@ -260,7 +264,7 @@ async function fetchFundData(code){
     const last=lines[lines.length-1].split(',');
     const price=parseFloat(last[1]);
     // 過去1年の分配金合計
-    let dividend=0;
+    let dividend=0;const exSet=new Set();
     const oneYearAgo=new Date();oneYearAgo.setFullYear(oneYearAgo.getFullYear()-1);
     for(const line of lines.slice(1)){
       const cols=line.split(',');
@@ -268,9 +272,13 @@ async function fetchFundData(code){
       if(!dm)continue;
       const dt=new Date(parseInt(dm[1]),parseInt(dm[2])-1,parseInt(dm[3]));
       const div=parseFloat(cols[3]);
-      if(dt>=oneYearAgo&&div&&div>0)dividend+=div;
+      if(dt>=oneYearAgo&&div&&div>0){
+        dividend+=div;
+        exSet.add(String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'));
+      }
     }
-    return{price:price&&price>0?price:null,dividend:dividend>0?Math.round(dividend*10)/10:null};
+    const exDates=[...exSet].sort();
+    return{price:price&&price>0?price:null,dividend:dividend>0?Math.round(dividend*10)/10:null,exDates:exDates.length?exDates:null};
   }catch(e){return{price:null,dividend:null}}
 }
 
@@ -295,6 +303,7 @@ async function updatePrices(){
       s.priceUpdated=true;ok++;
     }else{s.priceUpdated=false;ng++}
     if(data.dividend&&data.dividend>0)s.annualDividend=data.dividend;
+    if(data.exDates&&data.exDates.length)s.exDates=data.exDates;
   }
   save(SK,stocks);btn.classList.remove('loading');dot.classList.remove('pulsing');
   document.getElementById('update-label').textContent='株価を更新';
@@ -399,7 +408,7 @@ function renderHoldings(){
 
   el.innerHTML=`
     <div class="yoc-box"><strong>YoC（Yield on Cost）とは？</strong>買値ベースの配当利回り。<strong>現在利回り</strong>は今の株価ベース。株価が上がるほどYoC＞現在利回りになります。</div>
-    <div class="info-box"><strong>自動取得について</strong>：「株価を更新」ボタンで、日本株・米国株・投資信託すべての価格と配当（分配金）が自動取得されます。設定は不要です。米国株はドル表示（サマリー合計のみ円換算）。</div>
+    <div class="info-box"><strong>自動取得について</strong>：「株価を更新」ボタンで、日本株・米国株・投資信託すべての価格・配当（分配金）・権利落ち日が自動取得されます。設定は不要です。米国株はドル表示（サマリー合計のみ円換算）。権利落ち日は過去1年の実績に基づく予測です。</div>
     <div class="card" style="padding:0"><div class="table-wrap"><table><thead><tr>
       <th style="padding-left:1rem;min-width:130px">銘柄</th><th>株数</th><th>時価</th><th>現在利回り</th><th>YoC</th><th>取得単価</th><th>現在株価</th><th>受取配当累計</th><th>配当込み損益 ★</th><th>1株配当</th><th>年間配当</th><th>次回権利日</th><th style="text-align:right;padding-right:.6rem">操作</th>
     </tr></thead><tbody>${rows}</tbody></table></div></div>
@@ -469,6 +478,15 @@ function renderHistory(){
     const soldTag=heldTickers.has(h.ticker)?'':' <span class="badge badge-normal">売却済み</span>';
     const hc=h.currency||'JPY';
     return`<div class="hist-item"><div><div style="font-size:13px;font-weight:500">${h.ticker}　${h.stockName}${soldTag}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">${h.date}　${h.memo||''}</div></div><div style="display:flex;align-items:center;gap:8px"><div style="font-size:14px;font-weight:500;color:var(--green)">${fmtMoney(h.amount,hc)}</div><button class="del-btn" onclick="deleteHistory('${h.id}')">×</button></div></div>`}).join('')||'<div class="empty-state">配当の受取記録がありません。</div>';
+  // 年別推移グラフ用データ（古い年→新しい年）
+  const trendYears=Object.entries(byYear).sort((a,b)=>a[0].localeCompare(b[0]));
+  const maxYearAmt=Math.max(...trendYears.map(([,v])=>v),1);
+  const trendBars=trendYears.length>=1?trendYears.map(([yr,amt],i)=>{
+    const prev=i>0?trendYears[i-1][1]:null;
+    const growth=prev?((amt-prev)/prev*100):null;
+    const growthTag=growth!==null?`<span style="font-size:11px;margin-left:6px" class="${growth>=0?'pos':'neg'}">${growth>=0?'▲':'▼'}${Math.abs(growth).toFixed(1)}%</span>`:'';
+    return `<div class="bar-row"><div class="bar-ticker">${yr}年</div><div class="bar-track" style="height:26px"><div class="bar-fill" style="width:${amt/maxYearAmt*100}%;background:#1d9e75"></div></div><div style="flex-shrink:0;min-width:130px;font-size:12px;font-weight:500">${fmtYen(amt)}${growthTag}</div></div>`;
+  }).join(''):'';
   el.innerHTML=`
     <div class="info-box"><strong>売却済み銘柄の配当</strong>：銘柄を削除しても履歴は「売却済み」バッジ付きで残り、合計に含まれ続けます。米国株の配当はドルのまま記録できます（集計時は自動で円換算）。</div>
     <div class="mg" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.25rem">
@@ -476,6 +494,7 @@ function renderHistory(){
       <div class="mc"><div class="ml">年別受取状況</div><div style="margin-top:.5rem">${yearSummary}</div></div>
       <div class="mc"><div class="ml">最多受取銘柄</div><div class="mv" style="font-size:16px">${topStock()}</div></div>
     </div>
+    ${trendBars?`<div class="card"><div class="sl">年別配当推移（前年比つき）</div><div class="bar-list">${trendBars}</div><p class="footnote" style="margin-top:.75rem">受取履歴から自動集計。▲▼は前年比の増減率です。</p></div>`:''}
     <div class="card"><div class="sl">配当を記録する</div>
       <div class="form-grid">
         <div class="form-group"><label class="form-label">銘柄 *</label><select id="h-ticker" onchange="toggleOtherInput()"><option value="">選択</option>${stocks.map(s=>`<option value="${s.ticker}|${s.name}">${s.ticker} ${s.name}</option>`).join('')}<option value="__other__">その他（売却済み等）</option></select></div>
@@ -578,6 +597,15 @@ function renderSettings(){
       <button class="btn-primary" onclick="saveProxy()">URLを保存</button>
       ${cp?'<p class="footnote" style="margin-top:.6rem;color:var(--green)">✓ 設定済み（優先使用されます）</p>':''}
     </div>
+    <div class="card"><div class="sl">データのバックアップ・復元</div>
+      <div class="info-box">データはブラウザ内にのみ保存されるため、<strong>ブラウザの履歴削除やPCの買い替えで消える可能性があります。</strong>定期的にバックアップファイルを保存しておくと安心です。別の端末（スマホ⇔PC）へのデータ移行にも使えます。</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-primary" style="flex:1;min-width:180px" onclick="exportData()">⬇ バックアップを保存</button>
+        <button class="btn-primary" style="flex:1;min-width:180px;background:var(--bg);color:var(--text);border:.5px solid var(--border)" onclick="document.getElementById('import-file').click()">⬆ バックアップから復元</button>
+        <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
+      </div>
+      <p class="footnote" style="margin-top:.6rem">保存されるもの：保有銘柄・配当受取履歴・為替レート設定。ファイル名は日付入りで自動生成されます。</p>
+    </div>
     <div class="card"><div class="sl">データのリセット</div>
       <p style="font-size:12px;color:var(--text2);margin-bottom:.75rem">すべてのデータをデモ状態（メガバンク3社）に戻します。元に戻せません。</p>
       <button class="btn-primary" style="background:var(--red)" onclick="resetAll()">すべてのデータをリセット</button>
@@ -586,6 +614,38 @@ function renderSettings(){
 function saveRate(){const r=parseFloat(document.getElementById('rate-input').value);if(r&&r>0){localStorage.setItem(RK,String(r));renderAll();showToast(`✓ レートを $1=¥${r.toFixed(2)} に設定しました`)}else{alert('正しい数値を入力してください')}}
 function saveProxy(){const url=document.getElementById('proxy-url').value.trim();if(url)localStorage.setItem(PK,url);else localStorage.removeItem(PK);renderSettings();showToast(url?'✓ 保存しました':'URLを削除しました')}
 function resetAll(){if(!confirm('本当にリセットしますか？'))return;localStorage.removeItem(SK);localStorage.removeItem(HK);stocks=JSON.parse(JSON.stringify(DEF_STOCKS));hist=JSON.parse(JSON.stringify(DEF_HIST));save(SK,stocks);save(HK,hist);renderAll();showToast('リセットしました')}
+
+// ── バックアップ・復元 ─────────────────────
+function exportData(){
+  const data={app:'dividend-portfolio',version:1,exportedAt:new Date().toISOString(),stocks,hist,usdjpy:localStorage.getItem(RK)||null};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const d=new Date();
+  a.href=url;
+  a.download=`配当ポートフォリオ_バックアップ_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('✓ バックアップファイルを保存しました');
+}
+function importData(event){
+  const file=event.target.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      if(data.app!=='dividend-portfolio'||!Array.isArray(data.stocks)){alert('このファイルは配当ポートフォリオのバックアップではないようです');return}
+      if(!confirm(`バックアップから復元しますか？\n（銘柄${data.stocks.length}件・配当履歴${(data.hist||[]).length}件）\n※現在のデータは上書きされます`))return;
+      stocks=data.stocks;hist=data.hist||[];
+      save(SK,stocks);save(HK,hist);
+      if(data.usdjpy)localStorage.setItem(RK,data.usdjpy);
+      renderAll();showToast('✓ バックアップから復元しました');
+    }catch(err){alert('ファイルの読み込みに失敗しました。正しいバックアップファイルか確認してください。')}
+  };
+  reader.readAsText(file);
+  event.target.value='';
+}
 
 renderAll();
 </script>
